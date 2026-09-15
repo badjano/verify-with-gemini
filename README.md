@@ -1,6 +1,10 @@
 # Verify with Gemini
 
-Chrome extension that adds a **Verify** button on images. Click it to copy the image, open [Gemini](https://gemini.google.com), paste it, and ask **is this true?**
+<p align="center">
+  <img src="icon.jpg" alt="Verify with Gemini" width="420" />
+</p>
+
+Chrome extension that adds a **Verify** button on images. Click it to copy the image, open [Gemini](https://gemini.google.com), paste it, and ask your custom prompt (default: **is this true?**).
 
 ## Install
 
@@ -23,8 +27,6 @@ Open the extension popup to set the prompt in any language, for example:
 - `is this true?`
 - `isso é verdade?`
 - `¿es esto verdad?`
-
-Default prompt: `is this true?`
 
 ## Note
 
