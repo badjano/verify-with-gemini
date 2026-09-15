@@ -6,6 +6,8 @@
 
 Chrome extension that adds a **Verify** button on images. Click it to copy the image, open [Gemini](https://gemini.google.com), paste it, and ask your custom prompt (default: **is this true?**).
 
+**Privacy Policy:** [PRIVACY.md](./PRIVACY.md)
+
 ## Install
 
 1. Download or clone this repo
