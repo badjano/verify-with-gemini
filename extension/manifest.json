@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Verify with Gemini",
-  "version": "1.6.0",
-  "description": "Copy an image, open Gemini, and ask: is this true?",
+  "version": "1.7.0",
+  "description": "Hover any image, verify it with Gemini using your own prompt.",
   "minimum_chrome_version": "116",
   "permissions": [
+    "storage",
     "tabs",
     "scripting",
     "contextMenus",

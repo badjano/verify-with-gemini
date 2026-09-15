@@ -1,26 +1,27 @@
 (() => {
   if (window.__verifyWithGeminiOverlay) {
-    window.__verifyWithGeminiOverlay.rescan?.();
+    window.__verifyWithGeminiOverlay.refreshPrompt?.();
     return;
   }
 
   const MIN_EDGE = 64;
-  const PROMPT = "is this true?";
+  const DEFAULT_PROMPT = "is this true?";
   const HOST_ID = "vwg-overlay-host";
+  const HIDE_DELAY_MS = 200;
 
-  /** @type {Map<string, { el: HTMLButtonElement, getRect: () => DOMRect | null, src: string }>} */
-  const badges = new Map();
+  let promptText = DEFAULT_PROMPT;
   let isBusy = false;
-  let rafPending = false;
+  let activeTarget = null;
+  let hideTimer = null;
   let host = null;
   let shadow = null;
-  let statusPill = null;
+  let badge = null;
 
   function ensureHost() {
     host = document.getElementById(HOST_ID);
     if (host?.shadowRoot) {
       shadow = host.shadowRoot;
-      statusPill = shadow.getElementById("status");
+      badge = shadow.getElementById("badge");
       return;
     }
 
@@ -42,39 +43,26 @@
     shadow.innerHTML = `
       <style>
         :host { all: initial; }
-        .badge, .status {
+        .badge {
           position: fixed;
           pointer-events: auto;
-          display: inline-flex;
+          display: none;
           align-items: center;
           gap: 6px;
+          padding: 7px 12px;
           border: 0;
           border-radius: 999px;
-          box-shadow: 0 4px 14px rgba(0,0,0,.45);
-          font: 700 12px/1.2 "Segoe UI", system-ui, sans-serif;
+          background: #1a73e8;
           color: #fff;
+          font: 700 12px/1.2 "Segoe UI", system-ui, sans-serif;
+          box-shadow: 0 4px 14px rgba(0,0,0,.45);
           cursor: pointer;
           user-select: none;
           white-space: nowrap;
         }
-        .badge {
-          padding: 7px 12px;
-          background: #1a73e8;
-        }
+        .badge.is-visible { display: inline-flex; }
         .badge:hover { background: #1557b0; }
         .badge.is-busy { opacity: .85; cursor: wait; }
-        .badge.is-hidden { display: none !important; }
-        .status {
-          left: 12px;
-          bottom: 12px;
-          padding: 8px 12px;
-          background: #0f172a;
-          z-index: 2147483647;
-        }
-        .dot {
-          width: 8px; height: 8px; border-radius: 50%;
-          background: #22c55e; flex: 0 0 auto;
-        }
         .icon {
           width: 14px; height: 14px; border-radius: 50%;
           background: #fff; color: #1a73e8;
@@ -82,17 +70,24 @@
           font-size: 10px; font-weight: 800;
         }
       </style>
-      <button class="status" id="status" type="button" title="Verify with Gemini is active on this page">
-        <span class="dot"></span>
-        <span>Verify ready</span>
+      <button class="badge" id="badge" type="button">
+        <span class="icon">?</span>
+        <span class="label">Verify</span>
       </button>
     `;
-    statusPill = shadow.getElementById("status");
-    statusPill?.addEventListener("click", () => {
-      alert(
-        "Verify with Gemini is running.\n\nClick the blue Verify button on a photo, or right-click an image and choose Verify with Gemini."
-      );
-    });
+    badge = shadow.getElementById("badge");
+    badge.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+    badge.addEventListener("mouseleave", scheduleHide);
+    badge.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        if (activeTarget) verify(activeTarget.src, activeTarget.node, badge);
+      },
+      true
+    );
 
     (document.documentElement || document.body).appendChild(host);
   }
@@ -104,8 +99,17 @@
     }
   }
 
-  function mediaKey(src, rect) {
-    return `${src}|${Math.round(rect.left)}|${Math.round(rect.top)}|${Math.round(rect.width)}|${Math.round(rect.height)}`;
+  async function refreshPrompt() {
+    try {
+      const stored = await chrome.storage.sync.get({ prompt: DEFAULT_PROMPT });
+      const next = String(stored.prompt || "").trim();
+      promptText = next || DEFAULT_PROMPT;
+    } catch (_) {
+      promptText = DEFAULT_PROMPT;
+    }
+    if (badge) {
+      badge.title = `Copy image and ask Gemini: ${promptText}`;
+    }
   }
 
   function isAvatarSrc(src) {
@@ -125,72 +129,96 @@
     return match?.[2] || "";
   }
 
-  function collectTargets() {
-    /** @type {{ src: string, getRect: () => DOMRect, node: Element }[]} */
-    const out = [];
-
-    for (const img of document.querySelectorAll("img")) {
-      const src = img.currentSrc || img.src;
-      if (!src || isAvatarSrc(src)) continue;
-      const rect = img.getBoundingClientRect();
-      if (rect.width < MIN_EDGE || rect.height < MIN_EDGE) continue;
-      const style = window.getComputedStyle(img);
-      if (style.visibility === "hidden" || style.display === "none") continue;
-      out.push({
-        src,
-        node: img,
-        getRect: () => img.getBoundingClientRect(),
-      });
-    }
-
-    const containers = document.querySelectorAll(
-      '[data-testid="tweetPhoto"], [data-testid="image"], a[href*="/photo/"]'
-    );
-    for (const el of containers) {
-      const img = el.querySelector("img");
-      if (img) continue;
-      const src = bgUrl(el);
-      if (!src || isAvatarSrc(src)) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < MIN_EDGE || rect.height < MIN_EDGE) continue;
-      out.push({
-        src,
-        node: el,
-        getRect: () => el.getBoundingClientRect(),
-      });
-    }
-
-    return out;
+  function isEligibleImg(img) {
+    if (!(img instanceof HTMLImageElement)) return false;
+    const src = img.currentSrc || img.src;
+    if (!src || isAvatarSrc(src)) return false;
+    const rect = img.getBoundingClientRect();
+    if (rect.width < MIN_EDGE || rect.height < MIN_EDGE) return false;
+    const style = window.getComputedStyle(img);
+    if (style.visibility === "hidden" || style.display === "none") return false;
+    if (Number(style.opacity) === 0) return false;
+    return true;
   }
 
-  function positionBadge(entry) {
-    const rect = entry.getRect();
-    if (
-      !rect ||
-      rect.width < MIN_EDGE ||
-      rect.height < MIN_EDGE ||
-      rect.bottom < 0 ||
-      rect.top > innerHeight ||
-      rect.right < 0 ||
-      rect.left > innerWidth
-    ) {
-      entry.el.classList.add("is-hidden");
+  function targetFromPoint(x, y) {
+    const stack = document.elementsFromPoint(x, y);
+    for (const el of stack) {
+      if (el === host || (shadow && shadow.contains(el))) continue;
+      if (el instanceof HTMLImageElement && isEligibleImg(el)) {
+        return {
+          src: el.currentSrc || el.src,
+          node: el,
+          getRect: () => el.getBoundingClientRect(),
+        };
+      }
+      const photo = el.closest?.(
+        '[data-testid="tweetPhoto"], [data-testid="image"], a[href*="/photo/"]'
+      );
+      if (photo) {
+        const img = photo.querySelector("img");
+        if (img && isEligibleImg(img)) {
+          return {
+            src: img.currentSrc || img.src,
+            node: img,
+            getRect: () => img.getBoundingClientRect(),
+          };
+        }
+        const src = bgUrl(photo);
+        if (src && !isAvatarSrc(src)) {
+          const rect = photo.getBoundingClientRect();
+          if (rect.width >= MIN_EDGE && rect.height >= MIN_EDGE) {
+            return {
+              src,
+              node: photo,
+              getRect: () => photo.getBoundingClientRect(),
+            };
+          }
+        }
+      }
+      if (el instanceof HTMLImageElement) continue;
+      const nested = el.querySelector?.("img");
+      if (nested && isEligibleImg(nested)) {
+        return {
+          src: nested.currentSrc || nested.src,
+          node: nested,
+          getRect: () => nested.getBoundingClientRect(),
+        };
+      }
+    }
+    return null;
+  }
+
+  function placeBadge(target) {
+    keepHostAlive();
+    const rect = target.getRect();
+    if (!rect || rect.width < MIN_EDGE || rect.height < MIN_EDGE) {
+      badge.classList.remove("is-visible");
       return;
     }
-    entry.el.classList.remove("is-hidden");
-    const width = entry.el.offsetWidth || 92;
-    entry.el.style.top = `${Math.max(8, rect.top + 8)}px`;
-    entry.el.style.left = `${Math.max(8, Math.min(rect.right - width - 8, innerWidth - width - 8))}px`;
+    badge.classList.add("is-visible");
+    const width = badge.offsetWidth || 92;
+    const top = Math.max(8, Math.min(rect.top + 8, innerHeight - 40));
+    const left = Math.max(8, Math.min(rect.right - width - 8, innerWidth - width - 8));
+    badge.style.top = `${top}px`;
+    badge.style.left = `${left}px`;
+    badge.title = `Copy image and ask Gemini: ${promptText}`;
   }
 
-  function scheduleReposition() {
-    if (rafPending) return;
-    rafPending = true;
-    requestAnimationFrame(() => {
-      rafPending = false;
-      keepHostAlive();
-      for (const entry of badges.values()) positionBadge(entry);
-    });
+  function showFor(target) {
+    if (isBusy || !target) return;
+    activeTarget = target;
+    clearTimeout(hideTimer);
+    placeBadge(target);
+  }
+
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (isBusy) return;
+      activeTarget = null;
+      badge?.classList.remove("is-visible");
+    }, HIDE_DELAY_MS);
   }
 
   function canvasCaptureFromImg(img) {
@@ -229,12 +257,11 @@
   }
 
   async function captureSrc(src, node) {
-    // Prefer on-page canvas first so clipboard write stays close to the click.
     if (node instanceof HTMLImageElement) {
       try {
         return canvasCaptureFromImg(node);
       } catch (_) {
-        // Fall through to background fetch.
+        // Fall through.
       }
     }
     try {
@@ -250,159 +277,88 @@
     throw new Error("Could not copy this image");
   }
 
-  async function verify(src, node, badge) {
+  async function verify(src, node, button) {
     if (isBusy) return;
     isBusy = true;
-    const label = badge.querySelector(".label");
-    badge.classList.add("is-busy");
+    const label = button.querySelector(".label");
+    button.classList.add("is-busy");
     if (label) label.textContent = "Copying…";
     try {
+      await refreshPrompt();
       const captured = await captureSrc(src, node);
       if (!captured?.dataUrl) throw new Error("Could not copy image");
-
       await writePngClipboard(captured.dataUrl);
-
       if (label) label.textContent = "Opening…";
       const open = await chrome.runtime.sendMessage({
         type: "vwg_open_gemini",
-        prompt: PROMPT,
+        prompt: promptText,
       });
       if (!open?.ok) throw new Error(open?.error || "Could not open Gemini");
-
-      if (label) {
-        label.textContent = open.pasted ? "Sent" : "Opened";
-      }
+      if (label) label.textContent = open.pasted ? "Sent" : "Opened";
+      setTimeout(() => {
+        if (label) label.textContent = "Verify";
+        button.classList.remove("is-visible");
+      }, 700);
     } catch (err) {
       console.warn("[Verify with Gemini]", err);
       alert(`Verify with Gemini failed: ${err?.message || err}`);
+      if (label) label.textContent = "Verify";
     } finally {
       isBusy = false;
-      badge.classList.remove("is-busy");
-      if (label) label.textContent = "Verify";
+      button.classList.remove("is-busy");
     }
   }
 
-  function ensureBadge(target) {
-    const rect = target.getRect();
-    const key = mediaKey(target.src, rect);
-    let entry = badges.get(key);
-    if (entry) {
-      entry.getRect = target.getRect;
-      entry.src = target.src;
-      entry.node = target.node;
-      return entry;
-    }
-
-    // Drop stale keys for same node by src near same place.
-    for (const [k, existing] of badges) {
-      if (existing.src === target.src) {
-        const r = existing.getRect();
-        if (!r || Math.abs(r.top - rect.top) < 40) {
-          existing.el.remove();
-          badges.delete(k);
-        }
-      }
-    }
-
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "badge";
-    el.innerHTML = '<span class="icon">?</span><span class="label">Verify</span>';
-    el.title = "Copy image and ask Gemini: is this true?";
-    el.addEventListener(
-      "click",
-      (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        verify(target.src, target.node, el);
-      },
-      true
-    );
-
-    shadow.appendChild(el);
-    entry = { el, getRect: target.getRect, src: target.src, node: target.node };
-    badges.set(key, entry);
-    positionBadge(entry);
-    return entry;
-  }
-
-  function rescan() {
-    keepHostAlive();
-    const targets = collectTargets();
-    for (const target of targets) {
-      ensureBadge(target);
-    }
-
-    for (const [key, entry] of badges) {
-      const rect = entry.getRect?.();
-      if (!rect || rect.width < 1 || (entry.node && !document.contains(entry.node))) {
-        entry.el.remove();
-        badges.delete(key);
-      }
-    }
-    scheduleReposition();
-    const label = statusPill?.querySelector("span:last-of-type");
-    if (label) label.textContent = `Verify ready (${badges.size})`;
-  }
-
-  window.__verifyWithGeminiOverlay = { rescan };
+  window.__verifyWithGeminiOverlay = { refreshPrompt };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "vwg_ping") {
       keepHostAlive();
-      rescan();
-      sendResponse({ ok: true, badges: badges.size, href: location.href });
+      sendResponse({ ok: true, href: location.href });
+      return true;
+    }
+    if (message?.type === "vwg_prompt_updated") {
+      refreshPrompt().then(() => sendResponse({ ok: true }));
       return true;
     }
     return false;
   });
 
-  ensureHost();
-  rescan();
-
-  const mo = new MutationObserver(() => {
-    clearTimeout(window.__vwgScanTimer);
-    window.__vwgScanTimer = setTimeout(rescan, 200);
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "sync" && changes.prompt) {
+      refreshPrompt();
+    }
   });
-  mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
 
-  window.addEventListener("scroll", scheduleReposition, true);
-  window.addEventListener("resize", scheduleReposition);
-  setInterval(rescan, 1500);
+  ensureHost();
+  refreshPrompt();
 
+  let lastMove = 0;
   document.addEventListener(
     "mousemove",
     (event) => {
-      const stack = document.elementsFromPoint(event.clientX, event.clientY);
-      for (const el of stack) {
-        if (el === host) continue;
-        if (el instanceof HTMLImageElement) {
-          ensureBadge({
-            src: el.currentSrc || el.src,
-            node: el,
-            getRect: () => el.getBoundingClientRect(),
-          });
-          scheduleReposition();
-          return;
-        }
-        const photo = el.closest?.(
-          '[data-testid="tweetPhoto"], [data-testid="image"], a[href*="/photo/"]'
-        );
-        if (photo) {
-          const img = photo.querySelector("img");
-          if (img) {
-            ensureBadge({
-              src: img.currentSrc || img.src,
-              node: img,
-              getRect: () => img.getBoundingClientRect(),
-            });
-            scheduleReposition();
-          }
-          return;
-        }
-      }
+      const now = Date.now();
+      if (now - lastMove < 40) return;
+      lastMove = now;
+      const target = targetFromPoint(event.clientX, event.clientY);
+      if (target) showFor(target);
+      else scheduleHide();
     },
     { passive: true, capture: true }
   );
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (activeTarget && badge?.classList.contains("is-visible")) {
+        placeBadge(activeTarget);
+      }
+    },
+    true
+  );
+  window.addEventListener("resize", () => {
+    if (activeTarget && badge?.classList.contains("is-visible")) {
+      placeBadge(activeTarget);
+    }
+  });
 })();

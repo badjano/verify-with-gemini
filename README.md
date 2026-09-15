@@ -12,11 +12,19 @@ Chrome extension that adds a **Verify** button on images. Click it to copy the i
 
 ## Use
 
-1. Open any site with images (X, news, etc.)
-2. Click the blue **Verify** badge on a photo
-3. Gemini opens with the image and the prompt `is this true?`
+1. Hover a photo → blue **Verify** appears
+2. Click **Verify**
+3. Gemini opens with your saved prompt
 
-If auto-paste does not finish, use the **Paste now** button on Gemini, or press `Ctrl+V` in the chat box yourself.
+## Settings
+
+Open the extension popup to set the prompt in any language, for example:
+
+- `is this true?`
+- `isso é verdade?`
+- `¿es esto verdad?`
+
+Default prompt: `is this true?`
 
 ## Note
 

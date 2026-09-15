@@ -6,21 +6,61 @@
       body {
         font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
         margin: 12px;
-        width: 280px;
+        width: 300px;
         color: #0f172a;
       }
       h1 { font-size: 14px; margin: 0 0 8px; }
       p { margin: 0 0 8px; color: #334155; }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 0 0 4px;
+      }
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 64px;
+        resize: vertical;
+        padding: 8px;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        align-items: center;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 8px 12px;
+        background: #1a73e8;
+        color: #fff;
+        font: 700 12px/1 "Segoe UI", system-ui, sans-serif;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #e2e8f0;
+        color: #0f172a;
+      }
       .ok { color: #15803d; font-weight: 600; }
       .bad { color: #b91c1c; font-weight: 600; }
+      #status { margin-top: 10px; }
+      .hint { font-size: 11px; color: #64748b; margin-top: 6px; }
     </style>
   </head>
   <body>
     <h1>Verify with Gemini</h1>
+    <label for="prompt">Prompt (any language)</label>
+    <textarea id="prompt" spellcheck="true"></textarea>
+    <div class="hint">Example: is this true? / isso é verdade? / ¿es esto verdad?</div>
+    <div class="row">
+      <button id="save" type="button">Save</button>
+      <button id="reset" class="secondary" type="button">Reset</button>
+    </div>
     <p id="status">Checking this tab…</p>
-    <p><b>1.</b> Copy image to clipboard on the site<br/>
-       <b>2.</b> Open Gemini<br/>
-       <b>3.</b> Paste with trusted Ctrl+V on the Gemini tab</p>
     <script src="popup.js"></script>
   </body>
 </html>

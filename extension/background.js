@@ -1,11 +1,22 @@
 const GEMINI_URL = "https://gemini.google.com/app";
 const MENU_ID = "vwg-verify-image";
+const DEFAULT_PROMPT = "is this true?";
 
 /** @type {{ prompt: string } | null} */
 let memoryPending = null;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function getStoredPrompt() {
+  try {
+    const stored = await chrome.storage.sync.get({ prompt: DEFAULT_PROMPT });
+    const prompt = String(stored.prompt || "").trim();
+    return prompt || DEFAULT_PROMPT;
+  } catch (_) {
+    return DEFAULT_PROMPT;
+  }
 }
 
 function blobToDataUrl(blob) {
@@ -212,7 +223,7 @@ async function pasteClipboardIntoGemini(tabId, prompt) {
     await dispatchPasteShortcut(target);
     await sleep(800);
     await debuggerSend(target, "Input.insertText", {
-      text: prompt || "is this true?",
+      text: prompt || DEFAULT_PROMPT,
     });
   } finally {
     try {
@@ -228,7 +239,8 @@ async function pasteClipboardIntoGemini(tabId, prompt) {
  * Here we only open Gemini and try a trusted Ctrl+V on that tab.
  */
 async function openGeminiAndTryPaste(prompt) {
-  memoryPending = { prompt: prompt || "is this true?" };
+  const finalPrompt = String(prompt || "").trim() || (await getStoredPrompt());
+  memoryPending = { prompt: finalPrompt };
 
   const tabId = await findOrCreateGeminiTab();
   await waitForTabComplete(tabId);
@@ -306,7 +318,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         args: [fetched.dataUrl],
       });
     }
-    await openGeminiAndTryPaste("is this true?");
+    await openGeminiAndTryPaste(await getStoredPrompt());
   } catch (err) {
     if (tab?.id != null) {
       chrome.scripting.executeScript({
@@ -342,7 +354,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "vwg_open_gemini") {
-    openGeminiAndTryPaste(message.prompt || "is this true?")
+    openGeminiAndTryPaste(message.prompt || "")
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
     return true;
@@ -352,7 +364,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       const tabId = sender.tab?.id;
       if (tabId == null) throw new Error("Missing Gemini tab");
-      const prompt = memoryPending?.prompt || "is this true?";
+      const prompt = memoryPending?.prompt || (await getStoredPrompt());
       await pasteClipboardIntoGemini(tabId, prompt);
       memoryPending = null;
       sendResponse({ ok: true });

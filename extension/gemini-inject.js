@@ -48,7 +48,7 @@
       <div class="card">
         <p>Image is already on your clipboard. Auto-paste did not finish.</p>
         <button id="paste" type="button">Paste now (Ctrl+V)</button>
-        <div class="hint">Or click the Gemini text box and press Ctrl+V yourself, then type: is this true?</div>
+        <div class="hint">Or click the Gemini text box and press Ctrl+V yourself, then type your saved prompt.</div>
       </div>
     `;
 
