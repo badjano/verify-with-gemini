@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Verify with Gemini",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Hover any image, verify it with Gemini using your own prompt.",
   "minimum_chrome_version": "116",
   "permissions": [
