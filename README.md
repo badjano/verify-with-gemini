@@ -16,8 +16,8 @@ Chrome extension that adds a **Verify** button on images. Click it to copy the i
 
 ## Use
 
-1. Hover a photo → blue **Verify** appears
-2. Click **Verify**
+1. Open a site with images (X, news, etc.)
+2. Click the blue **Verify** button on a photo
 3. Gemini opens with your saved prompt
 
 ## Settings

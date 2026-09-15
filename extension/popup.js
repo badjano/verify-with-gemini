@@ -61,7 +61,7 @@ async function checkTab() {
     }
 
     if (alive) {
-      status.textContent = "Running on this tab. Hover an image to Verify.";
+      status.textContent = "Running on this tab. Verify buttons appear on photos.";
       status.className = "ok";
     } else {
       status.textContent = "Not running. Reload this page, then try again.";
